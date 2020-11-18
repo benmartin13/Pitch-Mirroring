@@ -1,0 +1,250 @@
+---
+title: "Pitch Mirroring"
+author: "Ben Martin"
+date: "11/14/2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Introduction:
+
+Pitch tunneling is an idea that a lot of pitchers try to implement into their arsenal. Basically, this is when two pitches start on the same path to the plate, and then deviate after the batter has made his decision to swing or not. This results in two pitches that look the same, and end up in different places after a batter has decided where he needs to swing, increasing the likelihood of fooling the batter.
+
+Along with this idea comes the idea of “mirroring” pitches in order to maximize their tunneling capabilities. Pitchers want their pitches to move in the exact opposite direction as much as possible, to maximize the difference between the two and bolster their tunneling effect. Many pitchers with a plus carry fastball try to pair it with a 12-6 curveball, since they move on the same plane but in opposite directions. This can be thought of as a “North-South” pairing. Pitchers also try to pair a sinker with arm-side run with a sweeping slider for the same reason (“East-West” pairing).
+
+Looking at a pitch’s movement plot from the pitcher’s point of view, its movement vector can be thought of like a time on a clock. For example, if a right handed pitcher has 20 inches of induced vertical break and 10 inches of horizontal break on his fastball, this would create “1 O’clock” movement. So, a perfectly mirrored curveball would have a “7 O’clock” movement vector.
+
+
+Visual:
+```{r}
+library(ggplot2)
+library(ggrepel)
+library(tidyverse)
+movement_plot <- function(...){
+  ggplot(...)+
+    geom_segment(x = 0,xend = 0, y= -25, yend = 25, color = "grey")+
+    geom_segment(x = -25, xend = 25, y = 0, yend = 0, color = "grey")+ 
+    scale_x_continuous(NULL, limits = c(-22, 22))+
+    scale_y_continuous(NULL, limits = c(-22, 22))
+}
+
+example <- matrix(data = c("FB",20,10,"CB",-20, -10), nrow = 2, ncol = 3,byrow = T)
+example <- as.data.frame(example)
+example <- example %>% rename(Pitch = V1, VB = V2, HB = V3)
+
+ggplot(example, aes(x = as.numeric(HB), y = as.numeric(VB), color = Pitch))+
+    geom_segment(x = 0,xend = 0, y= -25, yend = 25, color = "grey")+
+    geom_segment(x = -25, xend = 25, y = 0, yend = 0, color = "grey")+ 
+    scale_x_continuous(NULL, limits = c(-22, 22))+
+    scale_y_continuous(NULL, limits = c(-22, 22))+
+    geom_point()+
+    geom_label_repel(aes(label = Pitch),
+                     box.padding   = 0.35, 
+                     point.padding = 0.5,
+                     segment.color = 'orange3')+
+    theme(legend.position = "none")+
+    labs(title = "Perfectly Mirrored FB and CB, RHP")+
+    xlab("Horizontal Break")+
+    ylab("Vertical Break")
+
+```
+
+
+This analysis will look at two popular pitch pairings and quantify their "mirroring" effect. It will then look at how pitch mirroring relates to performance on the mound.
+
+##Step 1:
+Create a data frame for each pitcher that threw at least 100 pitches in 2020 containing the number of each pitch thrown, velocity, vertical and horizontal break, and spin direction.
+
+
+```{r, results = FALSE}
+#Getting 2020 Statcast data, adding spin direction
+
+
+library(baseballr)
+#create empty data frame with statcast scrape structure
+data <- scrape_statcast_savant_pitcher_all(start_date = "2020-07-23", end_date = "2020-07-23")
+data <- data[0,]
+
+#Season was 96 days long, from July 23 to October 27
+for(i in 0:95){
+  date <- as.Date("2020-07-23")+i
+  temp <- scrape_statcast_savant_pitcher_all(start_date = date, end_date = date)
+  data <- rbind(data, temp)
+}
+
+#Add spin direction to that table 
+spin <- read.csv("~/Desktop/spin_direction_pbp.csv")
+data2 <- left_join(data, spin, by = c("game_pk", "pitcher", "batter", "pitch_number", "inning"))
+```
+
+         
+```{r}
+data2 %>% dplyr::group_by(player_name) %>% dplyr::select(player_name) -> pitchers
+pitchers <- unique(pitchers)
+x <- nrow(pitchers)
+
+data3 <- data.frame(name = character(x),
+                    hand = character(x),
+                    n_pitches = numeric(x),
+                    n_fb = numeric(x),
+                    n_si = numeric(x),
+                    n_cb = numeric(x),
+                    n_sl = numeric(x),
+                    fb_velo = numeric(x),
+                    fb_z = numeric(x),
+                    fb_x = numeric(x),
+                    fb_dir = numeric(x),
+                    si_velo = numeric(x),
+                    si_z = numeric(x),
+                    si_x = numeric(x),
+                    si_dir = numeric(x),
+                    cb_velo = numeric(x),
+                    cb_z = numeric(x),
+                    cb_x = numeric(x),
+                    cb_dir = numeric(x),
+                    sl_velo = numeric(x),
+                    sl_z = numeric(x),
+                    sl_x = numeric(x),
+                    sl_dir = numeric(x)
+                    )
+
+for(i in 1:x){
+  temp <- filter(data2, player_name == pitchers$player_name[i])
+  
+  data3$name[i] <- pitchers$player_name[i]
+  data3$hand[i] <- temp$p_throws[1]
+  data3$n_pitches[i] <- nrow(temp)
+  data3$n_fb[i] <- nrow(filter(temp, pitch_name == "4-Seam Fastball"))
+  data3$n_si[i] <- nrow(filter(temp, pitch_name == "Sinker"))
+  data3$n_cb[i] <- nrow(filter(temp, pitch_name %in% c("Curveball","Knuckle Curve")))
+  data3$n_sl[i] <- nrow(filter(temp, pitch_name == "Slider"))
+  data3$fb_velo[i] <- mean(filter(temp, pitch_name == "4-Seam Fastball")$release_speed)
+  data3$fb_z[i] <- mean(filter(temp, pitch_name == "4-Seam Fastball")$pfx_z)*12
+  data3$fb_x[i] <- mean(filter(temp, pitch_name == "4-Seam Fastball")$pfx_x)*12
+  data3$fb_dir[i] <- mean(filter(temp, pitch_name == "4-Seam Fastball")$release_spin_direction)
+  data3$si_velo[i] <- mean(filter(temp, pitch_name == "Sinker")$release_speed)
+  data3$si_z[i] <- mean(filter(temp, pitch_name == "Sinker")$pfx_z)*12
+  data3$si_x[i] <- mean(filter(temp, pitch_name == "Sinker")$pfx_x)*12
+  data3$si_dir[i] <- mean(filter(temp, pitch_name == "Sinker")$release_spin_direction)
+  data3$cb_velo[i] <- mean(filter(temp, pitch_name %in% c("Curveball","Knuckle Curve"))$release_speed)
+  data3$cb_z[i] <- mean(filter(temp, pitch_name %in% c("Curveball","Knuckle Curve"))$pfx_z)*12
+  data3$cb_x[i] <- mean(filter(temp, pitch_name %in% c("Curveball","Knuckle Curve"))$pfx_x)*12
+  data3$cb_dir[i] <- mean(filter(temp, pitch_name %in% c("Curveball","Knuckle Curve"))$release_spin_direction)
+  data3$sl_velo[i] <- mean(filter(temp, pitch_name == "Slider")$release_speed)
+  data3$sl_z[i] <- mean(filter(temp, pitch_name == "Slider")$pfx_z)*12
+  data3$sl_x[i] <- mean(filter(temp, pitch_name == "Slider")$pfx_x)*12
+  data3$sl_dir[i] <- mean(filter(temp, pitch_name == "Slider")$release_spin_direction)                        
+}
+
+data4 <- filter(data3, n_pitches >= 100)
+```
+
+
+##Step 2: Create a "Mirroring Score"
+
+For this, 4-Seam Fastballs and Curveballs will be compared (North-South), and Sinkers/2-Seamers will be compared with sliders (East-West). For each pitcher, the clockwise angle of each pitch’s movement vector relative to the Y-axis (perfect North, or 12 O’clock) must be calculated. This is done by taking the arc tangent of the point created by the pitch’s vertical and horizontal movement, which returns the angle between that point and the X-axis, with the origin as the vertex. This angle is then subtracted from 90, to find the angle relative to the Y-axis rather than the X-axis. Then, only pitchers who have thrown at least 25 of each pitch in a pairing (25 fastballs and 25 curveballs, or 25 sinkers and 25 sliders) will be considered to ensure there is a large enough sample to say that pitcher has that pairing in his arsenal and it is worth evaluating how well they mirror.
+
+Once each pitch’s movement angle has been calculated, it will be compared to the angle of its paired pitch. The closer the difference is to 180 degrees, the better the pitches mirror. The Mirror Score for each pair will then be calculated by finding what percentile the difference in mirrored pitch angles falls in (with 0 being the upper bound, and the largest difference in angles in the set being the lower bound of the distribution).
+
+
+```{r}
+#Reverse horizontal movement sign of all pitches (make movement plot from pitcher's POV)
+data4 <- data4 %>% mutate(fb_x = -fb_x,
+                          cb_x = -cb_x,
+                          si_x = -si_x,
+                          sl_x = -sl_x)
+
+
+#Calculate the angle of each pitch movement relative to Vertical (90)
+for(i in 1:nrow(data4)){
+  if(data4$n_fb[i] >= 25){
+    data4$fb_ang[i] <- 90-(atan2(data4$fb_z[i],data4$fb_x[i])*180)/pi
+  }else(data4$cb_ang[i] <- NA)
+  if(data4$n_cb[i] >= 25){
+    data4$cb_ang[i] <- 90-(atan2(data4$cb_z[i],data4$cb_x[i])*180)/pi
+  }else(data4$cb_ang[i] <- NA)
+  if(data4$n_si[i] >= 25){
+    data4$si_ang[i] <- 90-(atan2(data4$si_z[i],data4$si_x[i])*180)/pi
+  }else(data4$si_ang[i] <- NA)
+  if(data4$n_sl[i] >= 25){
+    data4$sl_ang[i] <- 90-(atan2(data4$sl_z[i],data4$sl_x[i])*180)/pi
+  }else(data4$sl_ang[i] <- NA)
+}
+
+#Change any negative values to positive
+data4 <- data4 %>% mutate(fb_ang = case_when(fb_ang < 0 ~ fb_ang + 360,
+                                             fb_ang > 0 ~ fb_ang),
+                          cb_ang = case_when(cb_ang < 0 ~ cb_ang + 360,
+                                             cb_ang > 0 ~ cb_ang),
+                          si_ang = case_when(si_ang < 0 ~ si_ang + 360,
+                                             si_ang > 0 ~ si_ang),
+                          sl_ang = case_when(sl_ang < 0 ~ sl_ang + 360,
+                                             sl_ang > 0 ~ sl_ang))
+
+#Calculate difference in pitch pair angles
+data4 <- data4 %>% mutate(NSmirror = case_when(fb_ang < 180 ~ abs((fb_ang + 180)-cb_ang),
+                                               fb_ang > 180 ~ abs((fb_ang - 180)-cb_ang)),
+                          EWmirror = case_when(si_ang < 180 ~ abs((si_ang + 180)-sl_ang),
+                                               si_ang > 180 ~ abs((si_ang - 180)-sl_ang)))
+
+
+#Ranking mirror values
+for(i in 1:nrow(data4)){
+  if(is.na(data4$NSmirror[i]) == F){
+    data4$NSrank[i] <- (length(na.omit(data4$NSmirror))-rank(data4$NSmirror, na.last = T)[i])+1
+  }else(data4$NSrank[i] <- NA)
+  if(is.na(data4$EWmirror[i]) == F){
+    data4$EWrank[i] <- (length(na.omit(data4$EWmirror))-rank(data4$EWmirror, na.last = T)[i])+1
+  }else(data4$EWrank[i] <- NA)
+}
+
+#Calculating Mirror Score
+for(i in 1:nrow(data4)){
+  if(is.na(data4$NSrank[i])==F){
+    data4$NSscore[i] <- round(((data4$NSrank[i] - 1)/length(na.omit(data4$NSrank)))*100,0)
+  }else(data4$NSscore[i] <- NA)
+  if(is.na(data4$EWrank[i])==F){
+    data4$EWscore[i] <- round(((data4$EWrank[i] - 1)/length(na.omit(data4$EWrank)))*100,0)
+  }else(data4$EWscore[i] <- NA)
+}
+
+```
+
+##Step 3: Analysis of Mirror Score
+
+The final step is to analyze Mirror Score relative to FIP to evaluate if pitch mirroring is effective. For this, the FIP of each qualified pitcher in 2020 is placed in a table with their North-South and East-West Mirror Scores. Then, the correlation between FIP and the two different Mirror Scores is calculated. If there is a significant negative correlation between the Mirror Scores and FIP, then it means that FIP improves (decreases) as Mirror Score increases, and that mirroring pitches is effective.
+
+
+```{r}
+leaders <- fg_pitch_leaders(2020,2020, "all","y","pit")
+leaders <- leaders %>% select("Name","FIP")
+
+data4 <- data4 %>% rename(Name = name)
+
+leaders <- left_join(leaders, select(data4, "Name","NSscore","EWscore"), by = "Name")
+
+round(cor(na.omit(leaders[,c(2,3)]), method="pearson"), digits = 2) #NS cor to FIP
+round(cor(na.omit(leaders[,c(2,4)]), method="pearson"), digits = 2) #EW cor to FIP
+
+ggplot(data = leaders, aes(x = NSscore, y = FIP, color = "red"))+
+  geom_point()+
+  geom_smooth(method = "lm", se = F, color = "red")+
+  geom_point(aes(x = EWscore, y = FIP, color = "blue"))+
+  geom_smooth(aes(x = EWscore, y = FIP), method = "lm", se = F, color = "blue")+
+  labs(title = "Mirror Scores and FIP", x = "Mirror Score", y = "FIP")+
+  theme(legend.title = element_blank())+
+  scale_color_discrete(name = "Pairing", labels = c("N-S","E-W"))
+```
+
+##Conclusions:
+Just in taking a quick look at the mirror scores compared to FIP of 2020 qualifying pitchers, we can see that pitch mirroring doesn’t necessarily equate to performance on the mound. In fact, “North-South” mirror scores had essentially 0 (-.02) correlation with FIP. “East-West” mirror scores had a .38 correlation with FIP, which means it has a weak if not insignificant relationship to FIP given the sample size, and even if that relationship is significant it says that FIP increases (gets worse) as a pitcher mirrors his “East-West” pitches better. This relationship can be seen in the scatter plot above. So this raises the question: what does this tell us?
+
+The first thing to note about the pitch mirroring metric is that it does not take into account the velocity, magnitude of pitch movement, or even if the pitch’s movement is optimal for that pitch type. Rather, it looks only at how closely a pitch’s movement vector mirrors that of another. Essentially, a pitch could perfectly mirror another pitch, but if they do not have the right velocity or movement profiles then they won’t be effective. Conversely, a pitcher could have a very good fastball based on velocity and movement, and have their curveball not mirror it at all, but still find success just based on both of them being quality pitches.
+
+This analysis also looked only at the Fastball-Curveball (North-South) and the Sinker-Slider (East-West) pairings, as they are the most commonly talked about and easiest to comprehend and visualize. It doesn’t take into account the interaction to having both pairings in an arsenal, nor does it consider other pitch types that can be effective.
+
+
+Bottom line: Good pitches get outs. While the idea of mirroring pitches in an arsenal may still hold value if they can tunnel well and end in two different spots, it would appear that attempting to perfectly mirror the movement of two pitches does not equate to to better pitching performance. We have a general understanding of how pitches should move based on pitch type in order to perform optimally, and pitchers should strive to maximize their arsenal based on this, rather than on perfectly mirroring the movement of their other pitches. 
